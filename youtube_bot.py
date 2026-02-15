@@ -77,7 +77,9 @@ ydl_opts = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'ytsearch',
-    'source_address': '0.0.0.0'
+    'source_address': '0.0.0.0',
+    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+    'nocheckcertificate': True,
 }
 
 ffmpeg_options = {
@@ -109,7 +111,12 @@ async def search_youtube(query):
 
 async def get_video_info(url_or_query):
     """Video bilgilerini al"""
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    ydl_opts_custom = ydl_opts.copy()
+    ydl_opts_custom.update({
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    
+    with yt_dlp.YoutubeDL(ydl_opts_custom) as ydl:
         try:
             info = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: ydl.extract_info(url_or_query, download=False)
@@ -874,7 +881,7 @@ async def on_command_error(ctx, error):
 # Botu çalıştır
 if __name__ == "__main__":
     # Render'da environment variable'dan token al, yoksa dosyadakini kullan
-    TOKEN = os.getenv('DISCORD_TOKEN', 'a77b719e58f7867f8b9d7945514a14670aae978e215f1dcb8580e453014fb87b')
+    TOKEN = os.getenv('DISCORD_TOKEN', 'MTQ3MjYwMDU5MDg3NzE5NjM4MA.GWLO83.xC5pLwq1rdM7hJtO_SvGfVM8xM6yY-mvU2e2xk')
     
     if not TOKEN or TOKEN == 'YOUR_BOT_TOKEN_HERE':
         print("❌ HATA: Discord bot token bulunamadı!")
