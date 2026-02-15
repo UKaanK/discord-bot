@@ -117,9 +117,9 @@ async def search_youtube(query):
             return None
 
 async def get_video_info(url_or_query):
-    """Video bilgilerini al"""
+    """Video bilgilerini al - YouTube veya Invidious"""
     
-    # Farklı client'ları dene
+    # Önce yt-dlp ile dene
     clients = ['android_music', 'android', 'web', 'ios']
     
     for client in clients:
@@ -152,9 +152,88 @@ async def get_video_info(url_or_query):
                 }
             except Exception as e:
                 print(f"Video bilgisi alma hatası ({client}): {e}")
-                if client == clients[-1]:  # Son deneme başarısız olduysa
-                    return None
-                continue  # Diğer client'ı dene
+                if "Sign in to confirm" in str(e) or "bot" in str(e).lower():
+                    # YouTube bot detection - Invidious'a geç
+                    print("YouTube bot detection algılandı, Invidious kullanılıyor...")
+                    break
+                if client == clients[-1]:
+                    break
+                continue
+    
+    # YouTube başarısız olduysa Invidious dene
+    print("Invidious API kullanılıyor...")
+    return await get_video_info_invidious(url_or_query)
+
+
+async def get_video_info_invidious(url_or_query):
+    """Invidious API kullanarak video bilgisi al"""
+    import aiohttp
+    
+    # Invidious instance'ları (public ve güvenilir olanlar)
+    invidious_instances = [
+        'https://inv.nadeko.net',
+        'https://invidious.private.coffee',
+        'https://yt.artemislena.eu',
+        'https://invidious.nerdvpn.de',
+    ]
+    
+    # URL veya arama terimi?
+    video_id = None
+    if 'youtube.com' in url_or_query or 'youtu.be' in url_or_query:
+        # URL'den video ID çıkar
+        if 'v=' in url_or_query:
+            video_id = url_or_query.split('v=')[1].split('&')[0]
+        elif 'youtu.be/' in url_or_query:
+            video_id = url_or_query.split('youtu.be/')[1].split('?')[0]
+    
+    async with aiohttp.ClientSession() as session:
+        # Arama gerekiyorsa
+        if not video_id:
+            for instance in invidious_instances:
+                try:
+                    search_url = f"{instance}/api/v1/search?q={url_or_query}&type=video"
+                    async with session.get(search_url, timeout=10) as response:
+                        if response.status == 200:
+                            results = await response.json()
+                            if results and len(results) > 0:
+                                video_id = results[0]['videoId']
+                                print(f"Invidious arama başarılı: {video_id}")
+                                break
+                except Exception as e:
+                    print(f"Invidious arama hatası ({instance}): {e}")
+                    continue
+        
+        if not video_id:
+            return None
+        
+        # Video bilgilerini al
+        for instance in invidious_instances:
+            try:
+                video_url = f"{instance}/api/v1/videos/{video_id}"
+                async with session.get(video_url, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # En iyi ses formatını bul
+                        audio_url = None
+                        for fmt in data.get('adaptiveFormats', []):
+                            if fmt.get('type', '').startswith('audio'):
+                                audio_url = fmt.get('url')
+                                break
+                        
+                        if not audio_url:
+                            continue
+                        
+                        return {
+                            'url': audio_url,
+                            'title': data.get('title', 'Bilinmeyen'),
+                            'duration': data.get('lengthSeconds', 0),
+                            'thumbnail': f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+                            'webpage_url': f"https://youtube.com/watch?v={video_id}"
+                        }
+            except Exception as e:
+                print(f"Invidious video alma hatası ({instance}): {e}")
+                continue
     
     return None
 
@@ -254,7 +333,7 @@ async def play(ctx, *, query):
     song_info = await get_video_info(query)
     
     if not song_info:
-        await ctx.send("❌ Video bulunamadı veya indirilemedi! YouTube'un bot koruması aktif olabilir. Lütfen tekrar deneyin.")
+        await ctx.send("❌ Video bulunamadı! Hem YouTube hem Invidious proxy başarısız oldu. Lütfen başka bir şarkı deneyin.")
         return
     
     # Kuyruğa ekle
