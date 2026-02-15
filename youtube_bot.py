@@ -78,8 +78,15 @@ ydl_opts = {
     'no_warnings': True,
     'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
-    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android_music', 'android', 'web'],
+            'skip': ['hls', 'dash']
+        }
+    },
     'nocheckcertificate': True,
+    'age_limit': None,
+    'geo_bypass': True,
 }
 
 ffmpeg_options = {
@@ -111,30 +118,45 @@ async def search_youtube(query):
 
 async def get_video_info(url_or_query):
     """Video bilgilerini al"""
-    ydl_opts_custom = ydl_opts.copy()
-    ydl_opts_custom.update({
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    })
     
-    with yt_dlp.YoutubeDL(ydl_opts_custom) as ydl:
-        try:
-            info = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: ydl.extract_info(url_or_query, download=False)
-            )
-            
-            if 'entries' in info:
-                info = info['entries'][0]
-            
-            return {
-                'url': info['url'],
-                'title': info.get('title', 'Bilinmeyen'),
-                'duration': info.get('duration', 0),
-                'thumbnail': info.get('thumbnail', ''),
-                'webpage_url': info.get('webpage_url', '')
+    # Farklı client'ları dene
+    clients = ['android_music', 'android', 'web', 'ios']
+    
+    for client in clients:
+        ydl_opts_custom = ydl_opts.copy()
+        ydl_opts_custom.update({
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': [client],
+                    'skip': ['hls', 'dash']
+                }
             }
-        except Exception as e:
-            print(f"Video bilgisi alma hatası: {e}")
-            return None
+        })
+        
+        with yt_dlp.YoutubeDL(ydl_opts_custom) as ydl:
+            try:
+                info = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: ydl.extract_info(url_or_query, download=False)
+                )
+                
+                if 'entries' in info:
+                    info = info['entries'][0]
+                
+                return {
+                    'url': info['url'],
+                    'title': info.get('title', 'Bilinmeyen'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'webpage_url': info.get('webpage_url', '')
+                }
+            except Exception as e:
+                print(f"Video bilgisi alma hatası ({client}): {e}")
+                if client == clients[-1]:  # Son deneme başarısız olduysa
+                    return None
+                continue  # Diğer client'ı dene
+    
+    return None
 
 def format_duration(seconds):
     """Saniyeyi dakika:saniye formatına çevir"""
@@ -214,10 +236,17 @@ async def play(ctx, *, query):
     
     player = get_player(ctx.guild.id)
     
-    # Bota katıl
+    # Bota katıl veya yeniden bağlan
+    channel = ctx.author.voice.channel
     if not player.voice_client or not player.voice_client.is_connected():
-        channel = ctx.author.voice.channel
-        player.voice_client = await channel.connect()
+        try:
+            player.voice_client = await channel.connect(timeout=60.0, reconnect=True)
+        except Exception as e:
+            await ctx.send(f"❌ Sesli kanala bağlanırken hata: {str(e)}")
+            return
+    elif player.voice_client.channel != channel:
+        # Farklı kanaldaysa, yeni kanala geç
+        await player.voice_client.move_to(channel)
     
     await ctx.send("🔍 Aranıyor...")
     
@@ -225,7 +254,7 @@ async def play(ctx, *, query):
     song_info = await get_video_info(query)
     
     if not song_info:
-        await ctx.send("❌ Video bulunamadı veya indirilemedi!")
+        await ctx.send("❌ Video bulunamadı veya indirilemedi! YouTube'un bot koruması aktif olabilir. Lütfen tekrar deneyin.")
         return
     
     # Kuyruğa ekle
