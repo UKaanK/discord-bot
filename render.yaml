@@ -1,14 +1,11 @@
 services:
   - type: web
     name: youtube-discord-bot
-    env: python
-    buildCommand: |
-      apt-get update
-      apt-get install -y ffmpeg
-      pip install -r requirements.txt
+    runtime: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
     startCommand: python youtube_bot.py
     envVars:
       - key: DISCORD_TOKEN
         sync: false
-      - key: PYTHON_VERSION
-        value: 3.11.0
